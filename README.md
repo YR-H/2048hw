@@ -1,54 +1,55 @@
-# 2048-api
-A 2048 game api for training supervised learning (imitation learning) or reinforcement learning agents
+**文件作用：**
 
-# Code structure
-* [`game2048/`](game2048/): the main package.
-    * [`game.py`](game2048/game.py): the core 2048 `Game` class.
-    * [`agents.py`](game2048/agents.py): the `Agent` class with instances.
-    * [`displays.py`](game2048/displays.py): the `Display` class with instances, to show the `Game` state.
-    * [`expectimax/`](game2048/expectimax): a powerful ExpectiMax agent by [here](https://github.com/nneonneo/2048-ai).
-* [`explore.ipynb`](explore.ipynb): introduce how to use the `Agent`, `Display` and `Game`.
-* [`static/`](static/): frontend assets (based on Vue.js) for web app.
-* [`webapp.py`](webapp.py): run the web app (backend) demo.
-* [`evaluate.py`](evaluate.py): evaluate your self-defined agent.
+1. hyr
+   1. baseline 模仿学习神经网络智能体
+      1. agent.py 智能体类
+      2. network.py 神经网络类
+   2. models 保存的训练模型
+      1. nicemodel 测试结果比较好的模型
+   3. agent_base.py 智能体基类
+   4. network_base.py 神经网络基类
+   5. my_evaluate.py 自己写的模型评估文件，评估每个模型100次取平均成绩。
+   6. buffer.py 经验池类
+   7. ds_train_4node.py 分布式训练，learner用于训练模型，worker用于采集数据，buffer用于存储最优数据，verifier用于验证learner的学习效果。
+   8. utils.py 一些额外的数据处理函数
 
-# Requirements
-* code only tested on linux system (ubuntu 16.04)
-* Python 3 (Anaconda 3.6.3 specifically) with numpy and flask
+**训练运行方式：**
 
-# To define your own agents
-```python
-from game2048.agents import Agent
+在`hyr`文件夹下执行命令`python ds_train_4node.py`
 
-class YourOwnAgent(Agent):
+**模型结构：**
 
-    def step(self):
-        '''To define the agent's 1-step behavior given the `game`.
-        You can find more instance in [`agents.py`](game2048/agents.py).
-        
-        :return direction: 0: left, 1: down, 2: right, 3: up
-        '''
-        direction = some_function(self.game)
-        return direction
+我参考了助教在中期检查时给出的网络，该网络结构包含5个独立的卷积模块，5个模块的filters均为128：
+1. 第一个卷积层为`conv41`，它的核为(4, 1)，按行扫描棋盘，将棋盘的每行信息融合成一个独立的特征；
+2. 第二个卷积层为`conv14`，它的核为(1, 4)，按列扫描棋盘，将棋盘的每列信息融合成一个独立的特征；
+3. 第三个卷积层为`conv22`，它的核为(2, 2)，以2x2的大小循环扫描棋盘，提取4个方格内的信息融合成一个独立的特征；
+4. 第四个卷积层为`conv33`，它的核为(3, 3)，以3x3的大小循环扫描棋盘，提取9个方格内的信息融合成一个独立的特征(比上一个卷积层考虑的信息更多)；
+5. 第五个卷积层为`conv44`，它的核为(4, 4)，以4x4的大小扫描整个棋盘，提取整个棋盘的信息融合成一个独立的特征。
+5个卷积层的输出各自经过`flatten`层展平后，组合在一起拼成一个特征向量。
+特征向量由以下路径得到最终动作的概率分布：
+1. `Dense`层-l1
+2. `BatchNormalization`层-b1
+3. `Dense`层-l2
+4. `BatchNormalization`层-b2
+5. `Dense`层-l3，激活函数为`softmax`
+`BatchNormalization`层主要作用是归一化隐藏层的输出，使隐藏层的特征符合`N(0,1)`正态分布，防止梯度传导时出现提出消失的情况。
 
-```
+另外对于如何表示棋盘，采用了独热编码：
+原始棋盘为4x4的大小，将其转换为(4, 4, 16)的数据维度。
+转换思路如下：
+1. 比如棋盘上有个位置值为8，则使用`log2`运算算的其值为3
+2. 将其按16位长度表示为one-hot形式，即[0, 0, 0, 1, 0, ...(共16位)]
+设置为16最多可表示2的0至15次方，最高可达32768，足以表达1024，2048等棋盘数字
 
-# To compile the pre-defined ExpectiMax agent
+对于训练方式，采用了分布式训练，结构如下：
+1. 10554端口，verifier发送learner的最新评估得分给worker，使其产生相应难度的专家示例数据
+2. 10555端口，buffer发送训练数据给learner
+3. 10556端口，worker发送专家示例数据给buffer
+4. 10557端口，learner发送最新的神经网络模型参数给verifier
+其中，learner用于优化模型参数；worker用于采样专家示例数据；buffer用于存储专家示例数据；verifier用于验证learner模型的跑分效果
 
-```bash
-cd game2048/expectimax
-bash configure
-make
-```
+**致谢：**
+感谢老师和助教以及JZJ前辈对我的指导和帮助！
 
-# To run the web app
-```bash
-python webapp.py
-```
-![demo](preview2048.gif)
 
-# LICENSE
-The code is under Apache-2.0 License.
 
-# For EE369 / EE228 students from SJTU
-Please read course project [requirements](EE369.md) and [description](https://docs.qq.com/slide/DS05hVGVFY1BuRVp5). 
